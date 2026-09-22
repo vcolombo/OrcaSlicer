@@ -38,6 +38,7 @@ add_executable(${_TEST_NAME}_tests
     test_meshboolean.cpp
     test_marchingsquares.cpp
     test_lay_on_face.cpp
+    test_localapi.cpp
     test_model.cpp
     test_utils.cpp
     test_timeutils.cpp
