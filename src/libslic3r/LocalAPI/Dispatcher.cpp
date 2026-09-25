@@ -17,7 +17,7 @@ std::string respond(json body, const json &id, bool notification)
         return "";
     body["jsonrpc"] = "2.0";
     body["id"] = id;
-    return body.dump();
+    return body.dump(-1, ' ', false, json::error_handler_t::replace);
 }
 
 std::string fail(int code, std::string message, const json &id, bool notification)
@@ -41,13 +41,14 @@ std::string Dispatcher::dispatch(const std::string &request_json, bool authed) c
     json request;
     try {
         request = json::parse(request_json);
-    } catch (const json::parse_error &) {
+    } catch (const json::exception &) {
         return fail(ErrorParse, "parse error", json(nullptr), false);
     }
     if (!request.is_object())
         // v1 serves single calls only; batch arrays are invalid requests.
         return fail(ErrorInvalidRequest, "invalid request", json(nullptr), false);
-    if (request.value("jsonrpc", "") != "2.0")
+    const auto version_it = request.find("jsonrpc");
+    if (version_it == request.end() || !version_it->is_string() || *version_it != "2.0")
         return fail(ErrorInvalidRequest, "invalid request", usable_id(request), false);
 
     const bool notification = request.find("id") == request.end();

@@ -55,7 +55,9 @@ public:
 
     // Dispatches one JSON-RPC request. Returns "" for notifications
     // (requests without an "id" member), which never get a response.
-    // Never throws.
+    // JSON parse failures (including numeric overflow) and handler exceptions
+    // become error responses. Invalid UTF-8 in responses is replaced with U+FFFD.
+    // Allocation failures may still propagate.
     std::string dispatch(const std::string &request_json, bool authed) const;
 
 private:

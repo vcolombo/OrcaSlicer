@@ -1,6 +1,7 @@
 #include <stdexcept>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "libslic3r/LocalAPI/SliceLease.hpp"
 
@@ -79,6 +80,17 @@ TEST_CASE("malformed json returns ParseError with null id", "[LocalAPI]")
     CHECK(r.at("error").at("code") == -32700);
 }
 
+TEST_CASE("unrepresentable JSON numbers return ParseError before authentication", "[LocalAPI][Regression]")
+{
+    const auto request = GENERATE(
+        "1e10000",
+        R"({"jsonrpc":"2.0","method":"server.info","params":{"value":1e10000},"id":1})");
+    const json r = dispatch(make_table(), request, false);
+    CHECK(r.at("jsonrpc") == "2.0");
+    CHECK(r.at("id").is_null());
+    CHECK(r.at("error").at("code") == -32700);
+}
+
 TEST_CASE("batch array is rejected as InvalidRequest", "[LocalAPI]")
 {
     const json r = dispatch(make_table(), R"([{"jsonrpc":"2.0","method":"server.echo","id":1}])");
@@ -88,6 +100,17 @@ TEST_CASE("batch array is rejected as InvalidRequest", "[LocalAPI]")
 TEST_CASE("missing jsonrpc member is rejected as InvalidRequest", "[LocalAPI]")
 {
     const json r = dispatch(make_table(), R"({"method":"server.echo","id":1})");
+    CHECK(r.at("error").at("code") == -32600);
+}
+
+TEST_CASE("invalid JSON-RPC versions return InvalidRequest before authentication", "[LocalAPI][Regression]")
+{
+    const auto version = GENERATE("null", "true", "2", "[]", "{}", R"("1.0")");
+    const std::string request = std::string(R"({"jsonrpc":)") + version +
+        R"(,"method":"server.info","id":1})";
+    const json r = dispatch(make_table(), request, false);
+    CHECK(r.at("jsonrpc") == "2.0");
+    CHECK(r.at("id") == 1);
     CHECK(r.at("error").at("code") == -32600);
 }
 
@@ -129,6 +152,42 @@ TEST_CASE("unexpected handler exception maps to InternalError", "[LocalAPI]")
 {
     const json r = dispatch(make_table(), R"({"jsonrpc":"2.0","method":"job.crash","id":6})");
     CHECK(r.at("error").at("code") == -32603);
+}
+
+TEST_CASE("handler results replace invalid UTF-8 with valid JSON text", "[LocalAPI][Regression]")
+{
+    Dispatcher d;
+    d.add_method("file.path", [](const json &) {
+        return json{{"path", "bad\xFFpath"}};
+    });
+    const json r = dispatch(d, R"({"jsonrpc":"2.0","method":"file.path","id":4})");
+    CHECK(r.at("id") == 4);
+    CHECK(r.at("result").at("path") == u8"bad\uFFFDpath");
+}
+
+TEST_CASE("application errors replace invalid UTF-8 without losing error metadata", "[LocalAPI][Regression]")
+{
+    Dispatcher d;
+    d.add_method("file.fail", [](const json &) -> json {
+        throw MethodError{2100, "bad\xFFpath", "bad\xFFstage"};
+    });
+    const json r = dispatch(d, R"({"jsonrpc":"2.0","method":"file.fail","id":5})");
+    CHECK(r.at("id") == 5);
+    CHECK(r.at("error").at("code") == 2100);
+    CHECK(r.at("error").at("message") == u8"bad\uFFFDpath");
+    CHECK(r.at("error").at("stage") == u8"bad\uFFFDstage");
+}
+
+TEST_CASE("unexpected handler errors serialize invalid UTF-8 as InternalError", "[LocalAPI][Regression]")
+{
+    Dispatcher d;
+    d.add_method("file.crash", [](const json &) -> json {
+        throw std::runtime_error("bad\xFFpath");
+    });
+    const json r = dispatch(d, R"({"jsonrpc":"2.0","method":"file.crash","id":6})");
+    CHECK(r.at("id") == 6);
+    CHECK(r.at("error").at("code") == -32603);
+    CHECK(r.at("error").at("message").get<std::string>().find(u8"bad\uFFFDpath") != std::string::npos);
 }
 
 TEST_CASE("unauthenticated call to guarded method returns Unauthorized", "[LocalAPI]")
