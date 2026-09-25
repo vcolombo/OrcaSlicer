@@ -40,8 +40,9 @@ struct MethodError {
         : code(code_), message(std::move(message_)), stage(std::move(stage_)) {}
 };
 
-// Handler contract: params object (or null when omitted) in, result value
-// out. Unknown params members are the handler's business (tolerant readers).
+// Handler contract: named params only — an object, or null when omitted.
+// Present non-object params (including null and arrays) produce ErrorInvalidParams
+// after authentication. Unknown object members are the handler's business.
 using Handler = std::function<json(const json &params)>;
 
 struct Method {
@@ -55,6 +56,8 @@ public:
 
     // Dispatches one JSON-RPC request. Returns "" for notifications
     // (requests without an "id" member), which never get a response.
+    // Present IDs must be strings, numbers, or null; other types produce
+    // ErrorInvalidRequest before method lookup or authentication.
     // JSON parse failures (including numeric overflow) and handler exceptions
     // become error responses. Invalid UTF-8 in responses is replaced with U+FFFD.
     // Allocation failures may still propagate.

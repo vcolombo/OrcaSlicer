@@ -14,10 +14,13 @@ class Auth {
 public:
     // Installs (or rotates) the token. An empty token means none is set:
     // verification then fails closed.
+    // Any nonempty byte string is accepted; token length is public metadata,
+    // not a secret protected by verification timing.
     void set_token(std::string token) { m_token = std::move(token); }
     bool has_token() const { return !m_token.empty(); }
 
-    // Constant-time comparison against the stored token. Never throws.
+    // Rejects unset tokens and length mismatches. Equal-length contents are
+    // compared with OpenSSL's constant-time primitive. Never throws.
     bool verify(const std::string &presented) const noexcept;
 
 private:

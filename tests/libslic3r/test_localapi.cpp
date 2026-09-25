@@ -66,6 +66,39 @@ TEST_CASE("string id is echoed verbatim", "[LocalAPI]")
     CHECK(r.at("result") == json::object());
 }
 
+TEST_CASE("invalid request IDs are rejected without executing the handler", "[LocalAPI][Regression]")
+{
+    const auto id = GENERATE("true", "[]", "{}");
+    bool handler_called = false;
+    Dispatcher d;
+    d.add_method("job.start", [&handler_called](const json &) {
+        handler_called = true;
+        return json(true);
+    });
+    const std::string request = std::string(R"({"jsonrpc":"2.0","method":"job.start","id":)") + id + "}";
+    const json r = dispatch(d, request);
+    CHECK_FALSE(handler_called);
+    CHECK(r.at("id").is_null());
+    REQUIRE(r.contains("error"));
+    CHECK(r.at("error").at("code") == -32600);
+}
+
+TEST_CASE("invalid request IDs take precedence over method lookup and authentication", "[LocalAPI][Regression]")
+{
+    const auto method = GENERATE("nope.nope", "server.echo");
+    const json request = {{"jsonrpc", "2.0"}, {"method", method}, {"id", true}};
+    const json r = dispatch(make_table(), request.dump(), false);
+    CHECK(r.at("id").is_null());
+    CHECK(r.at("error").at("code") == -32600);
+}
+
+TEST_CASE("explicit null request ID is not treated as a notification", "[LocalAPI]")
+{
+    const json r = dispatch(make_table(), R"({"jsonrpc":"2.0","method":"server.info","id":null})", false);
+    CHECK(r.at("id").is_null());
+    CHECK(r.at("result") == json({{"impl", "test"}}));
+}
+
 TEST_CASE("unknown method returns MethodNotFound with id", "[LocalAPI]")
 {
     const json r = dispatch(make_table(), R"({"jsonrpc":"2.0","method":"nope.nope","id":3})");
@@ -131,6 +164,36 @@ TEST_CASE("extra top-level members are ignored", "[LocalAPI]")
     const json r = dispatch(make_table(), R"({"jsonrpc":"2.0","method":"server.echo","params":{"a":1},"id":9,"foo":"bar"})");
     CHECK(r.at("id") == 9);
     CHECK(r.at("result") == json({{"a", 1}}));
+}
+
+TEST_CASE("non-object parameters are rejected without executing calls or notifications", "[LocalAPI][Regression]")
+{
+    const auto params = GENERATE("null", "false", "1", R"("scalar")", "[]");
+    const bool notification = GENERATE(false, true);
+    bool handler_called = false;
+    Dispatcher d;
+    d.add_method("job.start", [&handler_called](const json &) {
+        handler_called = true;
+        return json(true);
+    });
+    std::string request = std::string(R"({"jsonrpc":"2.0","method":"job.start","params":)") + params;
+    request += notification ? "}" : R"(,"id":7})";
+    const std::string response = d.dispatch(request, true);
+    CHECK_FALSE(handler_called);
+    if (notification) {
+        CHECK(response.empty());
+    } else {
+        const json r = json::parse(response);
+        CHECK(r.at("id") == 7);
+        REQUIRE(r.contains("error"));
+        CHECK(r.at("error").at("code") == -32602);
+    }
+}
+
+TEST_CASE("authentication precedes parameter validation for guarded methods", "[LocalAPI]")
+{
+    const json r = dispatch(make_table(), R"({"jsonrpc":"2.0","method":"server.echo","params":1,"id":1})", false);
+    CHECK(r.at("error").at("code") == 1200);
 }
 
 TEST_CASE("handler app error maps to code and message envelope", "[LocalAPI]")
@@ -240,6 +303,15 @@ TEST_CASE("token rotation replaces the secret", "[LocalAPI]")
     auth.set_token("new-token");
     CHECK(auth.verify("new-token"));
     CHECK_FALSE(auth.verify("old-token"));
+}
+
+TEST_CASE("token comparison includes bytes after an embedded null", "[LocalAPI]")
+{
+    Slic3r::LocalAPI::Auth auth;
+    auth.set_token(std::string("key\0a", 5));
+    CHECK(auth.verify(std::string("key\0a", 5)));
+    CHECK_FALSE(auth.verify(std::string("key\0b", 5)));
+    CHECK_FALSE(auth.verify("key"));
 }
 
 TEST_CASE("idle lease grants API acquire", "[LocalAPI]")

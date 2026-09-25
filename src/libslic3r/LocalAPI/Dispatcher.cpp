@@ -51,7 +51,10 @@ std::string Dispatcher::dispatch(const std::string &request_json, bool authed) c
     if (version_it == request.end() || !version_it->is_string() || *version_it != "2.0")
         return fail(ErrorInvalidRequest, "invalid request", usable_id(request), false);
 
-    const bool notification = request.find("id") == request.end();
+    const auto id_it = request.find("id");
+    const bool notification = id_it == request.end();
+    if (!notification && !(id_it->is_string() || id_it->is_number() || id_it->is_null()))
+        return fail(ErrorInvalidRequest, "invalid request", json(nullptr), false);
     auto method_it = request.find("method");
     if (method_it == request.end() || !method_it->is_string())
         return fail(ErrorInvalidRequest, "invalid request", usable_id(request), notification);
@@ -62,7 +65,11 @@ std::string Dispatcher::dispatch(const std::string &request_json, bool authed) c
     if (table_it->second.requires_auth && !authed)
         return fail(ErrorUnauthorized, "unauthorized", usable_id(request), notification);
 
-    const json params = request.value("params", json(nullptr));
+    const auto params_it = request.find("params");
+    if (params_it != request.end() && !params_it->is_object())
+        return fail(ErrorInvalidParams, "invalid params", usable_id(request), notification);
+    const json omitted_params = nullptr;
+    const json &params = params_it == request.end() ? omitted_params : *params_it;
     json result;
     try {
         result = table_it->second.handler(params);
