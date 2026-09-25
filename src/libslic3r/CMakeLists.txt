@@ -317,6 +317,12 @@ set(lisbslic3r_sources
     Line.hpp
     LocalesUtils.cpp
     LocalesUtils.hpp
+    LocalAPI/Auth.cpp
+    LocalAPI/Auth.hpp
+    LocalAPI/Dispatcher.cpp
+    LocalAPI/Dispatcher.hpp
+    LocalAPI/SliceLease.cpp
+    LocalAPI/SliceLease.hpp
     MarchingSquares.hpp
     Measure.cpp
     Measure.hpp
